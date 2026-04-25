@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 import { generateQuestions } from "@/lib/generator";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import type {
+  BabID,
   Category,
   DifficultyLevel,
   LeaderboardEntry,
   Mode,
   SubmitPayload,
+  SubBabID,
 } from "@/types/game";
 
 export const runtime = "edge";
@@ -29,6 +31,64 @@ function isCategory(value: unknown): value is Category {
   );
 }
 
+function isBab(value: unknown): value is BabID {
+  return (
+    value === "mekanika" ||
+    value === "energi" ||
+    value === "fluida" ||
+    value === "listrik" ||
+    value === "modern"
+  );
+}
+
+function isSubBab(value: unknown): value is SubBabID {
+  return (
+    value === "all" ||
+    value === "vektor" ||
+    value === "gerak_lurus" ||
+    value === "glb_glbb" ||
+    value === "hukum_newton" ||
+    value === "resultan_gaya" ||
+    value === "usaha" ||
+    value === "energi_kinetik" ||
+    value === "energi_potensial" ||
+    value === "energi_mekanik" ||
+    value === "momentum" ||
+    value === "impuls" ||
+    value === "tekanan" ||
+    value === "fluida_statis" ||
+    value === "fluida_dinamis" ||
+    value === "hukum_pascal" ||
+    value === "hukum_archimedes" ||
+    value === "hukum_ohm" ||
+    value === "arus_listrik" ||
+    value === "rangkaian_seri" ||
+    value === "rangkaian_paralel" ||
+    value === "daya_listrik" ||
+    value === "listrik_statis" ||
+    value === "modern_atom" ||
+    value === "radioaktivitas" ||
+    value === "relativitas_dasar"
+  );
+}
+
+function resolveCategoryFromBab(bab: BabID): Category {
+  switch (bab) {
+    case "mekanika":
+      return "kinematika";
+    case "energi":
+      return "termodinamika";
+    case "fluida":
+      return "mix";
+    case "listrik":
+      return "listrik";
+    case "modern":
+      return "mix";
+    default:
+      return "mix";
+  }
+}
+
 function computeScore(correctCount: number, total: number, duration: number): number {
   const safeDuration = Math.max(1, duration);
   const accuracy = correctCount / total;
@@ -43,7 +103,7 @@ function isAnswerCorrect(actual: number, userAnswer: number): boolean {
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as SubmitPayload;
-    const { username, mode, difficulty, category, seed, answers, duration } = body;
+    const { username, mode, difficulty, category, bab, subBab, seed, answers, duration } = body;
     const normalizedCategory: Category = category ?? "mix";
 
     if (
@@ -53,6 +113,8 @@ export async function POST(request: Request) {
       !isMode(mode) ||
       !isDifficulty(difficulty) ||
       !isCategory(normalizedCategory) ||
+      (bab !== undefined && !isBab(bab)) ||
+      (subBab !== undefined && !isSubBab(subBab)) ||
       !seed ||
       typeof seed !== "string" ||
       !Array.isArray(answers) ||
@@ -66,13 +128,7 @@ export async function POST(request: Request) {
     }
 
     const normalizedUsername = username.trim().slice(0, 32);
-    const rebuiltQuestions = generateQuestions(
-      seed,
-      mode,
-      normalizedCategory,
-      difficulty,
-      answers.length,
-    );
+    const rebuiltQuestions = bab && subBab ? generateQuestions(bab, subBab, difficulty, mode) : generateQuestions(seed, mode, normalizedCategory, difficulty, answers.length);
 
     let correctCount = 0;
     rebuiltQuestions.forEach((question, idx) => {
@@ -87,7 +143,7 @@ export async function POST(request: Request) {
       username: normalizedUsername,
       mode,
       difficulty,
-      category: normalizedCategory,
+      category: bab ? resolveCategoryFromBab(bab) : normalizedCategory,
       score,
       correct_count: correctCount,
       total_questions: rebuiltQuestions.length,

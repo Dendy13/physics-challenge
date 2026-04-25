@@ -2,8 +2,8 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import type { Category, DifficultyLevel, Mode } from "@/types/game";
-import type { GamePayload, PublicQuestion } from "@/types/game";
+import { generateQuestions } from "@/lib/generator";
+import type { BabID, Category, DifficultyLevel, Mode, Question, SubBabID } from "@/types/game";
 
 type GameState = "menu" | "playing" | "result";
 
@@ -23,15 +23,14 @@ type LeaderboardRow = {
   duration?: number;
 };
 
-const DEFAULT_COUNT = 10;
 const GAME_TIME_LIMIT_SECONDS = 180;
 
-const categories: Array<{ value: Category; label: string }> = [
-  { value: "mix", label: "Mix" },
-  { value: "kinematika", label: "Kinematika" },
-  { value: "dinamika", label: "Dinamika" },
-  { value: "termodinamika", label: "Termodinamika" },
-  { value: "listrik", label: "Listrik" },
+const babOptions: Array<{ value: BabID; label: string; description: string }> = [
+  { value: "mekanika", label: "Mekanika", description: "Vektor, GLB/GLBB, Newton" },
+  { value: "energi", label: "Energi", description: "Usaha, energi kinetik/potensial" },
+  { value: "fluida", label: "Fluida", description: "Tekanan, Pascal, Archimedes" },
+  { value: "listrik", label: "Listrik", description: "Ohm, rangkaian, daya" },
+  { value: "modern", label: "Modern", description: "Atom, radioaktivitas, relativitas" },
 ];
 
 const difficulties: Array<{ value: DifficultyLevel; label: string }> = [
@@ -44,6 +43,66 @@ const modes: Array<{ value: Mode; label: string; hint: string }> = [
   { value: "simbol", label: "Simbol", hint: "Rumus langsung" },
   { value: "teks", label: "Teks", hint: "Cerita fisika" },
 ];
+
+const subBabOptionsByBab: Record<BabID, Array<{ value: SubBabID; label: string }>> = {
+  mekanika: [
+    { value: "all", label: "Seluruh Bab" },
+    { value: "vektor", label: "Vektor" },
+    { value: "gerak_lurus", label: "Gerak Lurus" },
+    { value: "glb_glbb", label: "GLB / GLBB" },
+    { value: "hukum_newton", label: "Hukum Newton" },
+    { value: "resultan_gaya", label: "Resultan Gaya" },
+    { value: "momentum", label: "Momentum" },
+    { value: "impuls", label: "Impuls" },
+  ],
+  energi: [
+    { value: "all", label: "Seluruh Bab" },
+    { value: "usaha", label: "Usaha" },
+    { value: "energi_kinetik", label: "Energi Kinetik" },
+    { value: "energi_potensial", label: "Energi Potensial" },
+    { value: "energi_mekanik", label: "Energi Mekanik" },
+  ],
+  fluida: [
+    { value: "all", label: "Seluruh Bab" },
+    { value: "tekanan", label: "Tekanan" },
+    { value: "fluida_statis", label: "Fluida Statis" },
+    { value: "fluida_dinamis", label: "Fluida Dinamis" },
+    { value: "hukum_pascal", label: "Hukum Pascal" },
+    { value: "hukum_archimedes", label: "Hukum Archimedes" },
+  ],
+  listrik: [
+    { value: "all", label: "Seluruh Bab" },
+    { value: "hukum_ohm", label: "Hukum Ohm" },
+    { value: "arus_listrik", label: "Arus Listrik" },
+    { value: "rangkaian_seri", label: "Rangkaian Seri" },
+    { value: "rangkaian_paralel", label: "Rangkaian Paralel" },
+    { value: "daya_listrik", label: "Daya Listrik" },
+    { value: "listrik_statis", label: "Listrik Statis" },
+  ],
+  modern: [
+    { value: "all", label: "Seluruh Bab" },
+    { value: "modern_atom", label: "Atom Modern" },
+    { value: "radioaktivitas", label: "Radioaktivitas" },
+    { value: "relativitas_dasar", label: "Relativitas Dasar" },
+  ],
+};
+
+function getLeaderboardCategory(bab: BabID): Category {
+  switch (bab) {
+    case "mekanika":
+      return "kinematika";
+    case "energi":
+      return "termodinamika";
+    case "fluida":
+      return "mix";
+    case "listrik":
+      return "listrik";
+    case "modern":
+      return "mix";
+    default:
+      return "mix";
+  }
+}
 
 function Leaderboard({ category }: { category: Category }) {
   const [rows, setRows] = useState<LeaderboardRow[]>([]);
@@ -149,11 +208,12 @@ export default function Home() {
   const [gameState, setGameState] = useState<GameState>("menu");
   const [username, setUsername] = useState("");
   const [mode, setMode] = useState<Mode>("simbol");
-  const [category, setCategory] = useState<Category>("mix");
+  const [selectedBab, setSelectedBab] = useState<BabID>("mekanika");
+  const [selectedSubBab, setSelectedSubBab] = useState<SubBabID>("all");
   const [difficulty, setDifficulty] = useState<DifficultyLevel>("easy");
 
   const [seed, setSeed] = useState("");
-  const [questions, setQuestions] = useState<PublicQuestion[]>([]);
+  const [questions, setQuestions] = useState<Question[]>([]);
   const [answers, setAnswers] = useState<number[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [currentInput, setCurrentInput] = useState("");
@@ -170,6 +230,8 @@ export default function Home() {
   const rafRef = useRef<number | null>(null);
 
   const currentQuestion = questions[currentIndex];
+  const availableSubBabOptions = subBabOptionsByBab[selectedBab];
+  const leaderboardCategory = useMemo(() => getLeaderboardCategory(selectedBab), [selectedBab]);
 
   const questionProgress = useMemo(() => {
     if (!questions.length) return 0;
@@ -224,21 +286,16 @@ export default function Home() {
     setIsGenerating(true);
 
     try {
-      const res = await fetch(
-        `/api/generate?mode=${mode}&category=${category}&difficulty=${difficulty}&count=${DEFAULT_COUNT}`,
-        {
-          method: "GET",
-        },
-      );
+      const generatedSeed = crypto.randomUUID();
+      const generatedQuestions = generateQuestions(selectedBab, selectedSubBab, difficulty, mode);
 
-      const data = (await res.json()) as GamePayload & { error?: string };
-      if (!res.ok) {
-        throw new Error(data.error || "Gagal mengambil soal.");
+      if (!generatedQuestions.length) {
+        throw new Error("Soal tidak tersedia untuk kombinasi bab/sub-bab ini.");
       }
 
-      setSeed(data.seed);
-      setQuestions(data.questions);
-      setAnswers(Array(data.questions.length).fill(0));
+      setSeed(generatedSeed);
+      setQuestions(generatedQuestions);
+      setAnswers(Array(generatedQuestions.length).fill(0));
       setCurrentIndex(0);
       setCurrentInput("");
       setElapsed(0);
@@ -264,7 +321,9 @@ export default function Home() {
         body: JSON.stringify({
           username,
           mode,
-          category,
+          bab: selectedBab,
+          subBab: selectedSubBab,
+          category: leaderboardCategory,
           difficulty,
           seed,
           answers: finalAnswers,
@@ -323,7 +382,7 @@ export default function Home() {
   }, [result]);
 
   return (
-    <main className="dark min-h-screen bg-[radial-gradient(circle_at_top,_#0f172a,_#020617_55%,_#030712_100%)] px-4 py-8 text-slate-100 md:px-8 md:py-10">
+    <main className="dark min-h-[100dvh] bg-[radial-gradient(circle_at_top,_#0f172a,_#020617_55%,_#030712_100%)] px-4 py-8 text-slate-100 md:px-8 md:py-10">
       <div className="mx-auto w-full max-w-5xl">
         <AnimatePresence mode="wait">
           {gameState === "menu" && (
@@ -342,7 +401,7 @@ export default function Home() {
                 Physics Challenge
               </h1>
               <p className="mt-3 text-sm text-slate-300 sm:text-base">
-                Pilih mode, kategori, dan difficulty. Semua bermain di satu halaman.
+                Pilih bab, sub-bab, mode, dan difficulty. Semua bermain di satu halaman.
               </p>
 
               <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/35 p-3">
@@ -383,24 +442,45 @@ export default function Home() {
 
                 <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-3">
                   <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
-                    Kategori
+                    Bab
                   </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {categories.map((item) => (
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                    {babOptions.map((item) => (
                       <button
                         key={item.value}
                         type="button"
-                        onClick={() => setCategory(item.value)}
-                        className={`min-h-12 rounded-xl px-3 py-2 text-sm font-semibold transition ${
-                          category === item.value
-                            ? "bg-cyan-400 text-slate-950"
-                            : "bg-white/5 text-slate-100 active:bg-white/15"
+                        onClick={() => {
+                          setSelectedBab(item.value);
+                          setSelectedSubBab("all");
+                        }}
+                        className={`rounded-xl border px-3 py-3 text-left transition ${
+                          selectedBab === item.value
+                            ? "border-cyan-300 bg-cyan-300 text-slate-950"
+                            : "border-white/10 bg-white/5 text-slate-100 active:bg-white/15"
                         }`}
                       >
-                        {item.label}
+                        <div className="text-sm font-bold">{item.label}</div>
+                        <div className="text-xs opacity-80">{item.description}</div>
                       </button>
                     ))}
                   </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-3">
+                  <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
+                    Sub-Bab
+                  </p>
+                  <select
+                    value={selectedSubBab}
+                    onChange={(e) => setSelectedSubBab(e.target.value as SubBabID)}
+                    className="h-12 w-full rounded-xl border border-white/15 bg-white/10 px-3 text-sm font-semibold text-white outline-none focus:border-cyan-300"
+                  >
+                    {availableSubBabOptions.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-3">
@@ -466,7 +546,7 @@ export default function Home() {
                   Soal {currentIndex + 1} / {questions.length}
                 </p>
                 <p className="mt-3 text-2xl font-black leading-snug text-white sm:text-3xl">
-                  {currentQuestion?.text}
+                  {currentQuestion?.question ?? currentQuestion?.text}
                 </p>
                 <p className="mt-2 text-sm text-slate-300">Tekan Enter untuk kirim jawaban.</p>
               </div>
@@ -556,8 +636,8 @@ export default function Home() {
                 <p className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-slate-300">
                   Leaderboard
                 </p>
-                <h3 className="mb-4 text-xl font-black text-white">Top 10 • {category}</h3>
-                <Leaderboard category={category} />
+                <h3 className="mb-4 text-xl font-black text-white">Top 10 • {leaderboardCategory}</h3>
+                <Leaderboard category={leaderboardCategory} />
               </div>
             </motion.div>
           )}
