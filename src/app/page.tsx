@@ -352,7 +352,7 @@ export default function Home() {
                 <input
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="contoh: dendy"
+                  placeholder="Username"
                   className="h-12 w-full rounded-xl border border-white/15 bg-white/8 px-4 text-base text-white outline-none ring-0 placeholder:text-slate-400 focus:border-cyan-300"
                 />
               </div>
