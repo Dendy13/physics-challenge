@@ -1,17 +1,30 @@
 "use client";
 
-import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { Category, DifficultyLevel, Mode } from "@/types/game";
+import type { GamePayload, PublicQuestion } from "@/types/game";
+
+type GameState = "menu" | "playing" | "result";
+
+type SubmitResult = {
+  score: number;
+  correctCount: number;
+  total: number;
+  message: string;
+};
 
 type LeaderboardRow = {
   username: string;
   score: number;
   difficulty: string;
+  mode?: string;
   category?: string;
   duration?: number;
 };
+
+const DEFAULT_COUNT = 10;
+const GAME_TIME_LIMIT_SECONDS = 180;
 
 const categories: Array<{ value: Category; label: string }> = [
   { value: "mix", label: "Mix" },
@@ -107,6 +120,7 @@ function Leaderboard({ category }: { category: Category }) {
             <div>
               <p className="text-sm font-semibold text-white">{row.username}</p>
               <p className="text-xs text-slate-300">
+                {row.mode ? `${row.mode} • ` : ""}
                 {row.difficulty} • {Math.round(row.duration ?? 0)}s
               </p>
             </div>
@@ -118,130 +132,448 @@ function Leaderboard({ category }: { category: Category }) {
   );
 }
 
+function formatDuration(seconds: number): string {
+  return seconds.toFixed(2);
+}
+
+function parseAnswer(value: string): number {
+  const parsed = Number.parseFloat(value);
+  if (Number.isNaN(parsed)) {
+    return 0;
+  }
+
+  return parsed;
+}
+
 export default function Home() {
+  const [gameState, setGameState] = useState<GameState>("menu");
+  const [username, setUsername] = useState("");
   const [mode, setMode] = useState<Mode>("simbol");
   const [category, setCategory] = useState<Category>("mix");
   const [difficulty, setDifficulty] = useState<DifficultyLevel>("easy");
 
-  const playHref = useMemo(
-    () => `/play?mode=${mode}&category=${category}&difficulty=${difficulty}`,
-    [mode, category, difficulty],
+  const [seed, setSeed] = useState("");
+  const [questions, setQuestions] = useState<PublicQuestion[]>([]);
+  const [answers, setAnswers] = useState<number[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [currentInput, setCurrentInput] = useState("");
+
+  const [elapsed, setElapsed] = useState(0);
+  const [result, setResult] = useState<SubmitResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [warning, setWarning] = useState<string | null>(null);
+
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const startRef = useRef<number | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  const currentQuestion = questions[currentIndex];
+
+  const questionProgress = useMemo(() => {
+    if (!questions.length) return 0;
+    return Math.round(((currentIndex + 1) / questions.length) * 100);
+  }, [currentIndex, questions.length]);
+
+  const timerProgress = useMemo(
+    () => Math.min((elapsed / GAME_TIME_LIMIT_SECONDS) * 100, 100),
+    [elapsed],
   );
+
+  useEffect(() => {
+    if (gameState !== "playing") return;
+
+    const tick = () => {
+      if (startRef.current !== null) {
+        setElapsed((performance.now() - startRef.current) / 1000);
+        rafRef.current = requestAnimationFrame(tick);
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, [gameState]);
+
+  useEffect(() => {
+    if (gameState === "playing") {
+      inputRef.current?.focus();
+    }
+  }, [gameState, currentIndex]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden && gameState === "playing") {
+        setWarning("Kecurangan terdeteksi: kamu berpindah tab.");
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [gameState]);
+
+  async function startGame() {
+    setError(null);
+    setWarning(null);
+    setResult(null);
+    setIsGenerating(true);
+
+    try {
+      const res = await fetch(
+        `/api/generate?mode=${mode}&category=${category}&difficulty=${difficulty}&count=${DEFAULT_COUNT}`,
+        {
+          method: "GET",
+        },
+      );
+
+      const data = (await res.json()) as GamePayload & { error?: string };
+      if (!res.ok) {
+        throw new Error(data.error || "Gagal mengambil soal.");
+      }
+
+      setSeed(data.seed);
+      setQuestions(data.questions);
+      setAnswers(Array(data.questions.length).fill(0));
+      setCurrentIndex(0);
+      setCurrentInput("");
+      setElapsed(0);
+      startRef.current = performance.now();
+      setGameState("playing");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  async function submitGame(finalAnswers: number[]) {
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/submit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username,
+          mode,
+          category,
+          difficulty,
+          seed,
+          answers: finalAnswers,
+          duration: elapsed,
+        }),
+      });
+
+      const data = (await res.json()) as SubmitResult & { error?: string };
+      if (!res.ok) {
+        throw new Error(data.error || "Gagal submit skor.");
+      }
+
+      setResult(data);
+      setGameState("result");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleAnswerSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (gameState !== "playing" || !currentQuestion) return;
+
+    const value = parseAnswer(currentInput);
+    const nextAnswers = [...answers];
+    nextAnswers[currentIndex] = value;
+    setAnswers(nextAnswers);
+    setCurrentInput("");
+
+    if (currentIndex === questions.length - 1) {
+      await submitGame(nextAnswers);
+      return;
+    }
+
+    setCurrentIndex((prev) => prev + 1);
+  }
+
+  function resetToMenu() {
+    setGameState("menu");
+    setCurrentIndex(0);
+    setCurrentInput("");
+    setQuestions([]);
+    setAnswers([]);
+    setElapsed(0);
+    setSeed("");
+    setResult(null);
+    setWarning(null);
+    setError(null);
+  }
+
+  const accuracy = useMemo(() => {
+    if (!result || result.total === 0) return 0;
+    return Math.round((result.correctCount / result.total) * 100);
+  }, [result]);
 
   return (
     <main className="dark min-h-screen bg-[radial-gradient(circle_at_top,_#0f172a,_#020617_55%,_#030712_100%)] px-4 py-8 text-slate-100 md:px-8 md:py-10">
-      <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-        <motion.section
-          initial={{ opacity: 0, y: 24 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35 }}
-          className="rounded-[2rem] border border-white/10 bg-white/10 p-6 shadow-[0_18px_70px_rgba(0,0,0,0.45)] backdrop-blur-xl md:p-10"
-        >
-          <p className="inline-flex rounded-full border border-cyan-200/20 bg-cyan-200/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.25em] text-cyan-200">
-            Physics Sprint
-          </p>
-          <h1 className="mt-4 text-4xl font-black leading-tight md:text-6xl">
-            Physics Challenge
-          </h1>
-          <p className="mt-4 max-w-2xl text-slate-300">
-            Pilih kategori dan tingkat kesulitan, lalu mulai sprint kuis fisika dengan
-            sistem skor berbasis waktu.
-          </p>
-
-          <div className="mt-8 grid gap-4 md:grid-cols-2">
-            <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-4 md:col-span-2">
-              <p className="mb-3 text-xs font-bold uppercase tracking-[0.25em] text-slate-400">
-                Mode
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                {modes.map((item) => (
-                  <button
-                    key={item.value}
-                    type="button"
-                    onClick={() => setMode(item.value)}
-                    className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${
-                      mode === item.value
-                        ? "bg-fuchsia-300 text-slate-950"
-                        : "bg-white/5 text-slate-200 hover:bg-white/15"
-                    }`}
-                  >
-                    {item.label}
-                    <span className="ml-2 text-xs opacity-80">{item.hint}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-4">
-              <p className="mb-3 text-xs font-bold uppercase tracking-[0.25em] text-slate-400">
-                Kategori
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                {categories.map((item) => (
-                  <button
-                    key={item.value}
-                    type="button"
-                    onClick={() => setCategory(item.value)}
-                    className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${
-                      category === item.value
-                        ? "bg-cyan-400 text-slate-950"
-                        : "bg-white/5 text-slate-200 hover:bg-white/15"
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-4">
-              <p className="mb-3 text-xs font-bold uppercase tracking-[0.25em] text-slate-400">
-                Difficulty
-              </p>
-              <div className="grid grid-cols-3 gap-2">
-                {difficulties.map((item) => (
-                  <button
-                    key={item.value}
-                    type="button"
-                    onClick={() => setDifficulty(item.value)}
-                    className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${
-                      difficulty === item.value
-                        ? "bg-emerald-400 text-slate-950"
-                        : "bg-white/5 text-slate-200 hover:bg-white/15"
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-8 flex flex-wrap gap-3">
-            <Link
-              href={playHref}
-              className="rounded-xl bg-white px-5 py-3 font-black text-slate-950 transition hover:bg-cyan-200"
+      <div className="mx-auto w-full max-w-5xl">
+        <AnimatePresence mode="wait">
+          {gameState === "menu" && (
+            <motion.div
+              key="menu"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -14 }}
+              transition={{ duration: 0.24 }}
+              className="rounded-3xl border border-white/10 bg-white/10 p-4 shadow-[0_18px_70px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-6"
             >
-              Mulai Main
-            </Link>
-            <span className="rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-slate-300">
-              Mode: {mode} • {category} • {difficulty}
-            </span>
-          </div>
-        </motion.section>
+              <p className="inline-flex rounded-full border border-cyan-200/20 bg-cyan-200/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.25em] text-cyan-200">
+                Menu Utama
+              </p>
+              <h1 className="mt-3 text-3xl font-black leading-tight sm:text-5xl">
+                Physics Challenge
+              </h1>
+              <p className="mt-3 text-sm text-slate-300 sm:text-base">
+                Pilih mode, kategori, dan difficulty. Semua bermain di satu halaman.
+              </p>
 
-        <motion.aside
-          initial={{ opacity: 0, y: 28 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05, duration: 0.35 }}
-          className="rounded-[2rem] border border-white/10 bg-white/10 p-6 backdrop-blur-xl"
-        >
-          <p className="mb-3 text-xs font-bold uppercase tracking-[0.25em] text-slate-400">
-            Leaderboard
-          </p>
-          <h2 className="mb-4 text-2xl font-black text-white">Top 10 • {category}</h2>
-          <Leaderboard category={category} />
-        </motion.aside>
+              <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/35 p-3">
+                <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
+                  Username
+                </p>
+                <input
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="contoh: dendy"
+                  className="h-12 w-full rounded-xl border border-white/15 bg-white/8 px-4 text-base text-white outline-none ring-0 placeholder:text-slate-400 focus:border-cyan-300"
+                />
+              </div>
+
+              <div className="mt-4 space-y-4">
+                <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-3">
+                  <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
+                    Mode
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {modes.map((item) => (
+                      <button
+                        key={item.value}
+                        type="button"
+                        onClick={() => setMode(item.value)}
+                        className={`min-h-14 rounded-xl px-3 py-2 text-left text-sm font-semibold transition ${
+                          mode === item.value
+                            ? "bg-fuchsia-300 text-slate-950"
+                            : "bg-white/5 text-slate-100 active:bg-white/15"
+                        }`}
+                      >
+                        <div>{item.label}</div>
+                        <div className="text-xs opacity-80">{item.hint}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-3">
+                  <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
+                    Kategori
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {categories.map((item) => (
+                      <button
+                        key={item.value}
+                        type="button"
+                        onClick={() => setCategory(item.value)}
+                        className={`min-h-12 rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                          category === item.value
+                            ? "bg-cyan-400 text-slate-950"
+                            : "bg-white/5 text-slate-100 active:bg-white/15"
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-3">
+                  <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-slate-400">
+                    Difficulty
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {difficulties.map((item) => (
+                      <button
+                        key={item.value}
+                        type="button"
+                        onClick={() => setDifficulty(item.value)}
+                        className={`min-h-12 rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                          difficulty === item.value
+                            ? "bg-emerald-400 text-slate-950"
+                            : "bg-white/5 text-slate-100 active:bg-white/15"
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                disabled={isGenerating || username.trim().length < 3}
+                onClick={startGame}
+                className="mt-5 h-13 w-full rounded-xl bg-white text-base font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                {isGenerating ? "Menyiapkan soal..." : "Mulai Bermain"}
+              </button>
+            </motion.div>
+          )}
+
+          {gameState === "playing" && (
+            <motion.div
+              key="playing"
+              initial={{ opacity: 0, x: 24 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -24 }}
+              transition={{ duration: 0.24 }}
+              className="rounded-3xl border border-white/10 bg-white/10 p-4 shadow-[0_18px_70px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-6"
+            >
+              <div className="mb-4 rounded-xl border border-slate-700 bg-slate-900/70 p-3">
+                <div className="mb-2 flex items-center justify-between text-xs font-bold uppercase tracking-[0.18em] text-slate-300">
+                  <span>Waktu</span>
+                  <span>
+                    {Math.min(Math.round(elapsed), GAME_TIME_LIMIT_SECONDS)}s / {GAME_TIME_LIMIT_SECONDS}s
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-slate-700">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500 transition-all"
+                    style={{ width: `${timerProgress}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-slate-950/55 p-4 text-center sm:p-6">
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-300">
+                  Soal {currentIndex + 1} / {questions.length}
+                </p>
+                <p className="mt-3 text-2xl font-black leading-snug text-white sm:text-3xl">
+                  {currentQuestion?.text}
+                </p>
+                <p className="mt-2 text-sm text-slate-300">Tekan Enter untuk kirim jawaban.</p>
+              </div>
+
+              <form onSubmit={handleAnswerSubmit} className="mt-4 space-y-3">
+                <div className="h-2 overflow-hidden rounded-full bg-slate-700">
+                  <div
+                    className="h-full rounded-full bg-cyan-400 transition-all"
+                    style={{ width: `${questionProgress}%` }}
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={inputRef}
+                    value={currentInput}
+                    onChange={(e) => setCurrentInput(e.target.value)}
+                    inputMode="decimal"
+                    type="number"
+                    placeholder={`Jawaban (${currentQuestion?.unit ?? ""})`}
+                    className="h-14 w-full rounded-xl border border-white/20 bg-white/10 px-4 text-center text-xl font-bold text-white outline-none ring-0 placeholder:text-slate-400 focus:border-cyan-300"
+                  />
+                  <div className="min-w-20 rounded-xl border border-white/15 bg-white/8 px-3 py-3 text-center text-sm font-bold text-slate-100">
+                    {currentQuestion?.unit}
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="h-14 w-full rounded-xl bg-emerald-500 text-base font-black text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-emerald-300"
+                >
+                  {isSubmitting
+                    ? "Menghitung Skor..."
+                    : currentIndex === questions.length - 1
+                      ? "Submit Score"
+                      : "Jawab & Lanjut"}
+                </button>
+              </form>
+            </motion.div>
+          )}
+
+          {gameState === "result" && (
+            <motion.div
+              key="result"
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.24 }}
+              className="space-y-4"
+            >
+              <div className="rounded-3xl border border-white/10 bg-white/10 p-4 backdrop-blur-xl sm:p-6">
+                <h2 className="text-2xl font-black text-white sm:text-3xl">Hasil Akhir</h2>
+                <p className="mt-2 text-sm text-slate-300">{result?.message}</p>
+
+                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="rounded-xl bg-white/8 p-3 text-center">
+                    <p className="text-xs uppercase tracking-wide text-slate-300">Skor</p>
+                    <p className="text-2xl font-black text-emerald-300">{result?.score ?? 0}</p>
+                  </div>
+                  <div className="rounded-xl bg-white/8 p-3 text-center">
+                    <p className="text-xs uppercase tracking-wide text-slate-300">Benar</p>
+                    <p className="text-2xl font-black text-cyan-300">
+                      {result?.correctCount ?? 0}/{result?.total ?? 0}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-white/8 p-3 text-center">
+                    <p className="text-xs uppercase tracking-wide text-slate-300">Akurasi</p>
+                    <p className="text-2xl font-black text-fuchsia-300">{accuracy}%</p>
+                  </div>
+                  <div className="rounded-xl bg-white/8 p-3 text-center">
+                    <p className="text-xs uppercase tracking-wide text-slate-300">Durasi</p>
+                    <p className="text-2xl font-black text-amber-300">{formatDuration(elapsed)}s</p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={resetToMenu}
+                  className="mt-4 h-12 w-full rounded-xl bg-white text-base font-black text-slate-950 transition hover:bg-cyan-200 sm:w-auto sm:px-6"
+                >
+                  Main Lagi
+                </button>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-white/10 p-4 backdrop-blur-xl sm:p-6">
+                <p className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-slate-300">
+                  Leaderboard
+                </p>
+                <h3 className="mb-4 text-xl font-black text-white">Top 10 • {category}</h3>
+                <Leaderboard category={category} />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {warning && (
+          <div className="mt-4 rounded-xl border border-amber-300 bg-amber-100 px-4 py-3 text-sm font-semibold text-amber-900">
+            {warning}
+          </div>
+        )}
+
+        {error && (
+          <div className="mt-4 rounded-xl border border-rose-300 bg-rose-100 px-4 py-3 text-sm font-semibold text-rose-900">
+            {error}
+          </div>
+        )}
       </div>
     </main>
   );
