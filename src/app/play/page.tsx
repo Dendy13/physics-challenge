@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import type { Difficulty, GamePayload, PublicQuestion } from "@/types/game";
+import type { Category, DifficultyLevel, GamePayload, PublicQuestion } from "@/types/game";
 
 type SubmitResult = {
   score: number;
@@ -11,6 +11,29 @@ type SubmitResult = {
 };
 
 const DEFAULT_COUNT = 10;
+const GAME_TIME_LIMIT_SECONDS = 180;
+
+function parseDifficultyParam(value: string | null): DifficultyLevel {
+  if (value === "easy" || value === "medium" || value === "hard") {
+    return value;
+  }
+
+  return "easy";
+}
+
+function parseCategoryParam(value: string | null): Category {
+  if (
+    value === "kinematika" ||
+    value === "dinamika" ||
+    value === "termodinamika" ||
+    value === "listrik" ||
+    value === "mix"
+  ) {
+    return value;
+  }
+
+  return "mix";
+}
 
 function formatDuration(seconds: number): string {
   return seconds.toFixed(2);
@@ -18,7 +41,16 @@ function formatDuration(seconds: number): string {
 
 export default function PlayPage() {
   const [username, setUsername] = useState("");
-  const [difficulty, setDifficulty] = useState<Difficulty>("simbol");
+  const [difficulty, setDifficulty] = useState<DifficultyLevel>(() => {
+    if (typeof window === "undefined") return "easy";
+    const params = new URLSearchParams(window.location.search);
+    return parseDifficultyParam(params.get("difficulty"));
+  });
+  const [category, setCategory] = useState<Category>(() => {
+    if (typeof window === "undefined") return "mix";
+    const params = new URLSearchParams(window.location.search);
+    return parseCategoryParam(params.get("category"));
+  });
   const [seed, setSeed] = useState("");
   const [questions, setQuestions] = useState<PublicQuestion[]>([]);
   const [answers, setAnswers] = useState<string[]>([]);
@@ -77,6 +109,10 @@ export default function PlayPage() {
     return Math.round(((currentIndex + 1) / questions.length) * 100);
   }, [currentIndex, questions.length]);
 
+  const timeProgress = useMemo(() => {
+    return Math.min((elapsed / GAME_TIME_LIMIT_SECONDS) * 100, 100);
+  }, [elapsed]);
+
   async function startGame() {
     setError(null);
     setWarning(null);
@@ -85,7 +121,7 @@ export default function PlayPage() {
 
     try {
       const res = await fetch(
-        `/api/generate?difficulty=${difficulty}&count=${DEFAULT_COUNT}`,
+        `/api/generate?difficulty=${difficulty}&category=${category}&count=${DEFAULT_COUNT}`,
         { method: "GET" },
       );
 
@@ -135,6 +171,7 @@ export default function PlayPage() {
         body: JSON.stringify({
           username,
           difficulty,
+          category,
           seed,
           answers: numericAnswers,
           duration: elapsed,
@@ -196,6 +233,21 @@ export default function PlayPage() {
             </div>
           </div>
 
+          {started && !finished && (
+            <div className="mb-6 rounded-xl border border-slate-700 bg-slate-900/70 p-3">
+              <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-widest text-slate-300">
+                <span>Progress Waktu</span>
+                <span>{Math.min(Math.round(elapsed), GAME_TIME_LIMIT_SECONDS)}s / {GAME_TIME_LIMIT_SECONDS}s</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-slate-700">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500 transition-all"
+                  style={{ width: `${timeProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           {!started && (
             <div className="mx-auto grid max-w-2xl gap-4 rounded-3xl border border-slate-200 bg-slate-50 p-5 md:grid-cols-2 md:p-6">
               <label className="flex flex-col gap-2 md:col-span-1">
@@ -213,10 +265,26 @@ export default function PlayPage() {
                 <select
                   className="h-14 rounded-2xl border border-slate-300 bg-white px-4 text-center text-lg font-semibold outline-none transition focus:border-blue-500 focus:ring-0"
                   value={difficulty}
-                  onChange={(e) => setDifficulty(e.target.value as Difficulty)}
+                  onChange={(e) => setDifficulty(e.target.value as DifficultyLevel)}
                 >
-                  <option value="simbol">Model Simbol</option>
-                  <option value="teks">Model Teks</option>
+                  <option value="easy">Easy</option>
+                  <option value="medium">Medium</option>
+                  <option value="hard">Hard</option>
+                </select>
+              </label>
+
+              <label className="flex flex-col gap-2 md:col-span-2">
+                <span className="text-sm font-semibold text-slate-700">Kategori</span>
+                <select
+                  className="h-14 rounded-2xl border border-slate-300 bg-white px-4 text-center text-lg font-semibold outline-none transition focus:border-blue-500 focus:ring-0"
+                  value={category}
+                  onChange={(e) => setCategory(parseCategoryParam(e.target.value))}
+                >
+                  <option value="mix">Mix</option>
+                  <option value="kinematika">Kinematika</option>
+                  <option value="dinamika">Dinamika</option>
+                  <option value="termodinamika">Termodinamika</option>
+                  <option value="listrik">Listrik</option>
                 </select>
               </label>
 

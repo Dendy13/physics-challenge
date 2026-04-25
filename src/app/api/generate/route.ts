@@ -1,11 +1,35 @@
 import { NextResponse } from "next/server";
 import { generateQuestions } from "@/lib/generator";
-import type { Difficulty, GamePayload } from "@/types/game";
+import type { Category, Difficulty, GamePayload } from "@/types/game";
 
 export const runtime = "edge";
 
 function parseDifficulty(value: string | null): Difficulty {
-  return value === "teks" ? "teks" : "simbol";
+  if (
+    value === "easy" ||
+    value === "medium" ||
+    value === "hard" ||
+    value === "simbol" ||
+    value === "teks"
+  ) {
+    return value;
+  }
+
+  return "easy";
+}
+
+function parseCategory(value: string | null): Category {
+  if (
+    value === "kinematika" ||
+    value === "dinamika" ||
+    value === "termodinamika" ||
+    value === "listrik" ||
+    value === "mix"
+  ) {
+    return value;
+  }
+
+  return "mix";
 }
 
 function parseCount(value: string | null): number {
@@ -17,10 +41,11 @@ function parseCount(value: string | null): number {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const difficulty = parseDifficulty(searchParams.get("difficulty"));
+  const category = parseCategory(searchParams.get("category"));
   const count = parseCount(searchParams.get("count"));
   const seed = searchParams.get("seed") || crypto.randomUUID();
 
-  const questions = generateQuestions(seed, difficulty, count);
+  const questions = generateQuestions(seed, difficulty, count, category);
   const sanitizedQuestions = questions.map((question) => ({
     id: question.id,
     text: question.text,
@@ -30,6 +55,7 @@ export async function GET(request: Request) {
   const payload: GamePayload = {
     seed,
     difficulty,
+    category,
     questions: sanitizedQuestions,
   };
 

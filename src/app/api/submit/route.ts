@@ -1,12 +1,33 @@
 import { NextResponse } from "next/server";
 import { generateQuestions } from "@/lib/generator";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import type { Difficulty, LeaderboardEntry, SubmitPayload } from "@/types/game";
+import type {
+  Category,
+  Difficulty,
+  LeaderboardEntry,
+  SubmitPayload,
+} from "@/types/game";
 
 export const runtime = "edge";
 
 function isDifficulty(value: unknown): value is Difficulty {
-  return value === "simbol" || value === "teks";
+  return (
+    value === "easy" ||
+    value === "medium" ||
+    value === "hard" ||
+    value === "simbol" ||
+    value === "teks"
+  );
+}
+
+function isCategory(value: unknown): value is Category {
+  return (
+    value === "kinematika" ||
+    value === "dinamika" ||
+    value === "termodinamika" ||
+    value === "listrik" ||
+    value === "mix"
+  );
 }
 
 function computeScore(correctCount: number, total: number, duration: number): number {
@@ -23,13 +44,15 @@ function isAnswerCorrect(actual: number, userAnswer: number): boolean {
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as SubmitPayload;
-    const { username, difficulty, seed, answers, duration } = body;
+    const { username, difficulty, category, seed, answers, duration } = body;
+    const normalizedCategory: Category = category ?? "mix";
 
     if (
       !username ||
       typeof username !== "string" ||
       username.trim().length < 3 ||
       !isDifficulty(difficulty) ||
+      !isCategory(normalizedCategory) ||
       !seed ||
       typeof seed !== "string" ||
       !Array.isArray(answers) ||
@@ -43,7 +66,12 @@ export async function POST(request: Request) {
     }
 
     const normalizedUsername = username.trim().slice(0, 32);
-    const rebuiltQuestions = generateQuestions(seed, difficulty, answers.length);
+    const rebuiltQuestions = generateQuestions(
+      seed,
+      difficulty,
+      answers.length,
+      normalizedCategory,
+    );
 
     let correctCount = 0;
     rebuiltQuestions.forEach((question, idx) => {
@@ -57,6 +85,7 @@ export async function POST(request: Request) {
     const entry: LeaderboardEntry = {
       username: normalizedUsername,
       difficulty,
+      category: normalizedCategory,
       score,
       correct_count: correctCount,
       total_questions: rebuiltQuestions.length,
@@ -68,7 +97,10 @@ export async function POST(request: Request) {
 
     if (error) {
       return NextResponse.json(
-        { error: "Gagal menyimpan skor.", detail: error.message },
+        {
+          error: "Gagal menyimpan skor.",
+          detail: error.message,
+        },
         { status: 500 },
       );
     }
