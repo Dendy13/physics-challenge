@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { generateQuestions } from "@/lib/generator";
-import type { Category, DifficultyLevel, GamePayload, Mode } from "@/types/game";
+import { generateQuestions } from "../../../lib/generator";
+import type { Category, DifficultyLevel, GamePayload, Mode, Question } from "@/types/game";
 
 export const runtime = "edge";
 
@@ -49,10 +49,10 @@ export async function GET(request: Request) {
   const seed = searchParams.get("seed") || crypto.randomUUID();
 
   const questions = generateQuestions(seed, mode, category, difficulty, count);
-  const sanitizedQuestions = questions.map((question) => ({
-    id: question.id,
-    text: question.text,
-    unit: question.unit,
+  const sanitizedQuestions = questions.map((question: Question) => ({
+    id: question.id ?? "",
+    text: question.question ?? question.text ?? "",
+    unit: question.unit ?? "",
   }));
 
   const payload: GamePayload = {
