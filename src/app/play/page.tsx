@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { Difficulty, GamePayload, PublicQuestion } from "@/types/game";
 
 type SubmitResult = {
@@ -23,13 +23,16 @@ export default function PlayPage() {
   const [questions, setQuestions] = useState<PublicQuestion[]>([]);
   const [answers, setAnswers] = useState<string[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [currentAnswer, setCurrentAnswer] = useState("");
   const [started, setStarted] = useState(false);
   const [finished, setFinished] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [result, setResult] = useState<SubmitResult | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const startRef = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
 
@@ -63,6 +66,10 @@ export default function PlayPage() {
     return () => document.removeEventListener("visibilitychange", onVisibilityChange);
   }, [started, finished]);
 
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, [currentIndex, started, finished]);
+
   const currentQuestion = questions[currentIndex];
 
   const progress = useMemo(() => {
@@ -74,7 +81,7 @@ export default function PlayPage() {
     setError(null);
     setWarning(null);
     setResult(null);
-    setLoading(true);
+    setIsGenerating(true);
 
     try {
       const res = await fetch(
@@ -82,13 +89,16 @@ export default function PlayPage() {
         { method: "GET" },
       );
 
-      if (!res.ok) throw new Error("Gagal mengambil soal.");
+      if (!res.ok) {
+        throw new Error("Gagal mengambil soal.");
+      }
 
       const payload = (await res.json()) as GamePayload;
       setSeed(payload.seed);
       setQuestions(payload.questions);
       setAnswers(Array(payload.questions.length).fill(""));
       setCurrentIndex(0);
+      setCurrentAnswer("");
       setStarted(true);
       setFinished(false);
       setElapsed(0);
@@ -96,11 +106,12 @@ export default function PlayPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
-      setLoading(false);
+      setIsGenerating(false);
     }
   }
 
   function updateAnswer(value: string) {
+    setCurrentAnswer(value);
     setAnswers((prev) => {
       const next = [...prev];
       next[currentIndex] = value;
@@ -108,26 +119,14 @@ export default function PlayPage() {
     });
   }
 
-  function goNext() {
-    if (currentIndex < questions.length - 1) {
-      setCurrentIndex((idx) => idx + 1);
-    }
-  }
-
-  function goPrev() {
-    if (currentIndex > 0) {
-      setCurrentIndex((idx) => idx - 1);
-    }
-  }
-
-  async function submitGame() {
+  async function submitGame(finalAnswers = answers) {
     if (!started || finished) return;
 
-    setLoading(true);
+    setIsSubmitting(true);
     setError(null);
 
     try {
-      const numericAnswers = answers.map((ans) => Number.parseFloat(ans || "0"));
+      const numericAnswers = finalAnswers.map((answer) => Number.parseFloat(answer || "0"));
       const res = await fetch("/api/submit", {
         method: "POST",
         headers: {
@@ -153,147 +152,169 @@ export default function PlayPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
-      setLoading(false);
+      setIsSubmitting(false);
     }
   }
 
+  async function handleAnswer(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+
+    if (!started || finished || !currentQuestion) return;
+
+    const nextAnswers = [...answers];
+    nextAnswers[currentIndex] = currentAnswer;
+    setAnswers(nextAnswers);
+    setCurrentAnswer("");
+
+    if (currentIndex === questions.length - 1) {
+      await submitGame(nextAnswers);
+      return;
+    }
+
+    setCurrentIndex((index) => index + 1);
+  }
+
   return (
-    <div className="min-h-screen bg-slate-100 p-4 md:p-8">
-      <div className="mx-auto max-w-4xl rounded-3xl bg-white p-6 shadow-xl md:p-10">
-        <div className="mb-8 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-3xl font-black tracking-tight text-slate-900 md:text-4xl">
-              Physics Challenge
-            </h1>
-            <p className="text-slate-600">Sprint fisika untuk skor berbasis kecepatan.</p>
-          </div>
-          <div className="rounded-2xl bg-slate-900 px-4 py-3 text-right text-white">
-            <p className="text-xs uppercase tracking-widest text-slate-300">Stopwatch</p>
-            <p className="text-2xl font-bold tabular-nums">{formatDuration(elapsed)} s</p>
-          </div>
-        </div>
-
-        {!started && (
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="flex flex-col gap-2">
-              <span className="text-sm font-semibold text-slate-700">Username</span>
-              <input
-                className="rounded-xl border border-slate-300 px-4 py-3 outline-none ring-blue-500 transition focus:ring"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="contoh: dendy"
-              />
-            </label>
-
-            <label className="flex flex-col gap-2">
-              <span className="text-sm font-semibold text-slate-700">Mode Soal</span>
-              <select
-                className="rounded-xl border border-slate-300 px-4 py-3 outline-none ring-blue-500 transition focus:ring"
-                value={difficulty}
-                onChange={(e) => setDifficulty(e.target.value as Difficulty)}
-              >
-                <option value="simbol">Model Simbol (Sprint Physics)</option>
-                <option value="teks">Model Teks (Concept Mastery)</option>
-              </select>
-            </label>
-
-            <button
-              type="button"
-              disabled={loading || username.trim().length < 3}
-              onClick={startGame}
-              className="md:col-span-2 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
-            >
-              {loading ? "Menyiapkan soal..." : "Mulai Challenge"}
-            </button>
-          </div>
-        )}
-
-        {started && currentQuestion && !finished && (
-          <div className="space-y-5">
-            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
-              <div
-                className="h-full bg-blue-600 transition-all"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-              <p className="mb-2 text-sm font-semibold text-slate-500">
-                Soal {currentIndex + 1} / {questions.length}
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe,_#f8fafc_40%,_#e2e8f0_100%)] px-4 py-6 text-slate-900 md:px-8 md:py-10">
+      <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-4xl items-center justify-center">
+        <div className="w-full rounded-[2rem] border border-white/60 bg-white/85 p-6 shadow-[0_25px_80px_rgba(15,23,42,0.12)] backdrop-blur md:p-10">
+          <div className="mb-6 flex flex-col items-center justify-between gap-4 text-center md:flex-row md:text-left">
+            <div>
+              <p className="mb-2 inline-flex rounded-full bg-slate-900 px-3 py-1 text-xs font-bold uppercase tracking-[0.25em] text-white">
+                Physics Challenge
               </p>
-              <p className="text-lg font-semibold leading-relaxed text-slate-900">
-                {currentQuestion.text}
+              <h1 className="text-3xl font-black tracking-tight md:text-4xl">
+                Sprint fisika, jawab secepat mungkin.
+              </h1>
+            </div>
+            <div className="rounded-3xl bg-slate-950 px-5 py-4 text-white shadow-lg shadow-slate-950/20">
+              <p className="text-[0.7rem] uppercase tracking-[0.35em] text-slate-300">Timer</p>
+              <p className="mt-1 text-4xl font-black tabular-nums md:text-5xl">
+                {formatDuration(elapsed)}
               </p>
+              <p className="text-sm text-slate-300">detik</p>
             </div>
+          </div>
 
-            <div className="flex items-center gap-3">
-              <input
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-lg outline-none ring-blue-500 transition focus:ring"
-                type="number"
-                inputMode="decimal"
-                value={answers[currentIndex] || ""}
-                onChange={(e) => updateAnswer(e.target.value)}
-                placeholder={`Jawaban (${currentQuestion.unit})`}
-              />
-              <span className="rounded-lg bg-slate-200 px-3 py-2 text-slate-700">
-                {currentQuestion.unit}
-              </span>
-            </div>
+          {!started && (
+            <div className="mx-auto grid max-w-2xl gap-4 rounded-3xl border border-slate-200 bg-slate-50 p-5 md:grid-cols-2 md:p-6">
+              <label className="flex flex-col gap-2 md:col-span-1">
+                <span className="text-sm font-semibold text-slate-700">Username</span>
+                <input
+                  className="h-14 rounded-2xl border border-slate-300 bg-white px-4 text-center text-lg font-semibold outline-none transition focus:border-blue-500 focus:ring-0"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="contoh: dendy"
+                />
+              </label>
 
-            <div className="flex flex-wrap gap-3">
+              <label className="flex flex-col gap-2 md:col-span-1">
+                <span className="text-sm font-semibold text-slate-700">Mode Soal</span>
+                <select
+                  className="h-14 rounded-2xl border border-slate-300 bg-white px-4 text-center text-lg font-semibold outline-none transition focus:border-blue-500 focus:ring-0"
+                  value={difficulty}
+                  onChange={(e) => setDifficulty(e.target.value as Difficulty)}
+                >
+                  <option value="simbol">Model Simbol</option>
+                  <option value="teks">Model Teks</option>
+                </select>
+              </label>
+
               <button
                 type="button"
-                onClick={goPrev}
-                disabled={currentIndex === 0}
-                className="rounded-xl border border-slate-300 px-4 py-2 font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={isGenerating || username.trim().length < 3}
+                onClick={startGame}
+                className="h-14 rounded-2xl bg-slate-900 text-base font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400 md:col-span-2"
               >
-                Sebelumnya
+                {isGenerating ? "Menyiapkan soal..." : "Mulai Challenge"}
               </button>
-
-              {currentIndex < questions.length - 1 ? (
-                <button
-                  type="button"
-                  onClick={goNext}
-                  className="rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white transition hover:bg-slate-700"
-                >
-                  Lanjut
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={submitGame}
-                  disabled={loading}
-                  className="rounded-xl bg-emerald-600 px-4 py-2 font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
-                >
-                  {loading ? "Mengirim skor..." : "Submit Score"}
-                </button>
-              )}
             </div>
-          </div>
-        )}
+          )}
 
-        {result && (
-          <div className="mt-8 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
-            <h2 className="text-xl font-bold text-emerald-900">Hasil Challenge</h2>
-            <p className="mt-2 text-emerald-800">{result.message}</p>
-            <p className="mt-1 text-emerald-800">Skor: {result.score}</p>
-            <p className="text-emerald-800">
-              Benar: {result.correctCount} / {result.total}
-            </p>
-          </div>
-        )}
+          {started && currentQuestion && !finished && (
+            <form onSubmit={handleAnswer} className="space-y-5">
+              <div className="h-3 overflow-hidden rounded-full bg-slate-200">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-blue-600 to-cyan-500 transition-all"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
 
-        {warning && (
-          <div className="mt-6 rounded-xl border border-amber-300 bg-amber-100 px-4 py-3 text-amber-900">
-            {warning}
-          </div>
-        )}
+              <div className="rounded-[2rem] border border-slate-200 bg-slate-950 px-6 py-8 text-center text-white shadow-xl shadow-slate-900/10 md:px-10 md:py-12">
+                <p className="mb-3 text-sm font-semibold uppercase tracking-[0.35em] text-cyan-300">
+                  Soal {currentIndex + 1} dari {questions.length}
+                </p>
+                <p className="mx-auto max-w-3xl text-2xl font-black leading-snug md:text-4xl">
+                  {currentQuestion.text}
+                </p>
+                <p className="mt-4 text-sm text-slate-300">Jawab cepat, tekan Enter untuk lanjut.</p>
+              </div>
 
-        {error && (
-          <div className="mt-6 rounded-xl border border-rose-300 bg-rose-100 px-4 py-3 text-rose-900">
-            {error}
-          </div>
-        )}
+              <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                <input
+                  ref={inputRef}
+                  className="h-16 w-full rounded-2xl border border-slate-300 bg-white px-4 text-center text-2xl font-bold tracking-tight outline-none transition focus:border-blue-500 focus:ring-0 md:text-3xl"
+                  type="number"
+                  inputMode="decimal"
+                  value={currentAnswer}
+                  onChange={(e) => updateAnswer(e.target.value)}
+                  placeholder={`Jawaban (${currentQuestion.unit})`}
+                  aria-label="Jawaban soal"
+                />
+                <div className="rounded-2xl bg-slate-100 px-5 py-4 text-center text-sm font-bold uppercase tracking-[0.25em] text-slate-700 md:min-w-28">
+                  {currentQuestion.unit}
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="h-14 w-full rounded-2xl bg-emerald-600 text-base font-bold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-emerald-300"
+              >
+                {isSubmitting
+                  ? "Menghitung Skor..."
+                  : currentIndex === questions.length - 1
+                    ? "Submit Score"
+                    : "Kirim Jawaban"}
+              </button>
+            </form>
+          )}
+
+          {result && (
+            <div className="mt-6 rounded-3xl border border-emerald-200 bg-emerald-50 p-5 text-center md:p-6">
+              <h2 className="text-2xl font-black text-emerald-950">Hasil Challenge</h2>
+              <p className="mt-2 text-emerald-800">{result.message}</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                  <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">Skor</p>
+                  <p className="mt-1 text-2xl font-black text-slate-900">{result.score}</p>
+                </div>
+                <div className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                  <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">Benar</p>
+                  <p className="mt-1 text-2xl font-black text-slate-900">
+                    {result.correctCount}/{result.total}
+                  </p>
+                </div>
+                <div className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                  <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">Waktu</p>
+                  <p className="mt-1 text-2xl font-black text-slate-900">{formatDuration(elapsed)}s</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {warning && (
+            <div className="mt-6 rounded-2xl border border-amber-300 bg-amber-100 px-4 py-3 text-center font-semibold text-amber-900">
+              {warning}
+            </div>
+          )}
+
+          {error && (
+            <div className="mt-6 rounded-2xl border border-rose-300 bg-rose-100 px-4 py-3 text-center font-semibold text-rose-900">
+              {error}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
