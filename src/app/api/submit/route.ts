@@ -3,21 +3,20 @@ import { generateQuestions } from "@/lib/generator";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import type {
   Category,
-  Difficulty,
+  DifficultyLevel,
   LeaderboardEntry,
+  Mode,
   SubmitPayload,
 } from "@/types/game";
 
 export const runtime = "edge";
 
-function isDifficulty(value: unknown): value is Difficulty {
-  return (
-    value === "easy" ||
-    value === "medium" ||
-    value === "hard" ||
-    value === "simbol" ||
-    value === "teks"
-  );
+function isMode(value: unknown): value is Mode {
+  return value === "simbol" || value === "teks";
+}
+
+function isDifficulty(value: unknown): value is DifficultyLevel {
+  return value === "easy" || value === "medium" || value === "hard";
 }
 
 function isCategory(value: unknown): value is Category {
@@ -44,13 +43,14 @@ function isAnswerCorrect(actual: number, userAnswer: number): boolean {
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as SubmitPayload;
-    const { username, difficulty, category, seed, answers, duration } = body;
+    const { username, mode, difficulty, category, seed, answers, duration } = body;
     const normalizedCategory: Category = category ?? "mix";
 
     if (
       !username ||
       typeof username !== "string" ||
       username.trim().length < 3 ||
+      !isMode(mode) ||
       !isDifficulty(difficulty) ||
       !isCategory(normalizedCategory) ||
       !seed ||
@@ -68,9 +68,10 @@ export async function POST(request: Request) {
     const normalizedUsername = username.trim().slice(0, 32);
     const rebuiltQuestions = generateQuestions(
       seed,
+      mode,
+      normalizedCategory,
       difficulty,
       answers.length,
-      normalizedCategory,
     );
 
     let correctCount = 0;
@@ -84,6 +85,7 @@ export async function POST(request: Request) {
 
     const entry: LeaderboardEntry = {
       username: normalizedUsername,
+      mode,
       difficulty,
       category: normalizedCategory,
       score,

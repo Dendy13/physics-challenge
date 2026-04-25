@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
-import type { Category, DifficultyLevel } from "@/types/game";
+import type { Category, DifficultyLevel, Mode } from "@/types/game";
 
 type LeaderboardRow = {
   username: string;
@@ -25,6 +25,11 @@ const difficulties: Array<{ value: DifficultyLevel; label: string }> = [
   { value: "easy", label: "Easy" },
   { value: "medium", label: "Medium" },
   { value: "hard", label: "Hard" },
+];
+
+const modes: Array<{ value: Mode; label: string; hint: string }> = [
+  { value: "simbol", label: "Simbol", hint: "Rumus langsung" },
+  { value: "teks", label: "Teks", hint: "Cerita fisika" },
 ];
 
 function Leaderboard({ category }: { category: Category }) {
@@ -114,12 +119,13 @@ function Leaderboard({ category }: { category: Category }) {
 }
 
 export default function Home() {
+  const [mode, setMode] = useState<Mode>("simbol");
   const [category, setCategory] = useState<Category>("mix");
   const [difficulty, setDifficulty] = useState<DifficultyLevel>("easy");
 
   const playHref = useMemo(
-    () => `/play?category=${category}&difficulty=${difficulty}`,
-    [category, difficulty],
+    () => `/play?mode=${mode}&category=${category}&difficulty=${difficulty}`,
+    [mode, category, difficulty],
   );
 
   return (
@@ -143,6 +149,29 @@ export default function Home() {
           </p>
 
           <div className="mt-8 grid gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-4 md:col-span-2">
+              <p className="mb-3 text-xs font-bold uppercase tracking-[0.25em] text-slate-400">
+                Mode
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {modes.map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => setMode(item.value)}
+                    className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                      mode === item.value
+                        ? "bg-fuchsia-300 text-slate-950"
+                        : "bg-white/5 text-slate-200 hover:bg-white/15"
+                    }`}
+                  >
+                    {item.label}
+                    <span className="ml-2 text-xs opacity-80">{item.hint}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-4">
               <p className="mb-3 text-xs font-bold uppercase tracking-[0.25em] text-slate-400">
                 Kategori
@@ -196,7 +225,7 @@ export default function Home() {
               Mulai Main
             </Link>
             <span className="rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-slate-300">
-              Mode: {category} • {difficulty}
+              Mode: {mode} • {category} • {difficulty}
             </span>
           </div>
         </motion.section>

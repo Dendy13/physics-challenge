@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import type { Category, DifficultyLevel, GamePayload, PublicQuestion } from "@/types/game";
+import type {
+  Category,
+  DifficultyLevel,
+  GamePayload,
+  Mode,
+  PublicQuestion,
+} from "@/types/game";
 
 type SubmitResult = {
   score: number;
@@ -12,6 +18,14 @@ type SubmitResult = {
 
 const DEFAULT_COUNT = 10;
 const GAME_TIME_LIMIT_SECONDS = 180;
+
+function parseModeParam(value: string | null): Mode {
+  if (value === "simbol" || value === "teks") {
+    return value;
+  }
+
+  return "simbol";
+}
 
 function parseDifficultyParam(value: string | null): DifficultyLevel {
   if (value === "easy" || value === "medium" || value === "hard") {
@@ -41,6 +55,11 @@ function formatDuration(seconds: number): string {
 
 export default function PlayPage() {
   const [username, setUsername] = useState("");
+  const [mode, setMode] = useState<Mode>(() => {
+    if (typeof window === "undefined") return "simbol";
+    const params = new URLSearchParams(window.location.search);
+    return parseModeParam(params.get("mode"));
+  });
   const [difficulty, setDifficulty] = useState<DifficultyLevel>(() => {
     if (typeof window === "undefined") return "easy";
     const params = new URLSearchParams(window.location.search);
@@ -121,7 +140,7 @@ export default function PlayPage() {
 
     try {
       const res = await fetch(
-        `/api/generate?difficulty=${difficulty}&category=${category}&count=${DEFAULT_COUNT}`,
+        `/api/generate?mode=${mode}&difficulty=${difficulty}&category=${category}&count=${DEFAULT_COUNT}`,
         { method: "GET" },
       );
 
@@ -131,6 +150,9 @@ export default function PlayPage() {
 
       const payload = (await res.json()) as GamePayload;
       setSeed(payload.seed);
+      setMode(payload.mode);
+      setDifficulty(payload.difficulty);
+      setCategory(payload.category ?? category);
       setQuestions(payload.questions);
       setAnswers(Array(payload.questions.length).fill(""));
       setCurrentIndex(0);
@@ -170,6 +192,7 @@ export default function PlayPage() {
         },
         body: JSON.stringify({
           username,
+          mode,
           difficulty,
           category,
           seed,
@@ -262,6 +285,18 @@ export default function PlayPage() {
 
               <label className="flex flex-col gap-2 md:col-span-1">
                 <span className="text-sm font-semibold text-slate-700">Mode Soal</span>
+                <select
+                  className="h-14 rounded-2xl border border-slate-300 bg-white px-4 text-center text-lg font-semibold outline-none transition focus:border-blue-500 focus:ring-0"
+                  value={mode}
+                  onChange={(e) => setMode(parseModeParam(e.target.value))}
+                >
+                  <option value="simbol">Simbol</option>
+                  <option value="teks">Teks</option>
+                </select>
+              </label>
+
+              <label className="flex flex-col gap-2 md:col-span-1">
+                <span className="text-sm font-semibold text-slate-700">Difficulty</span>
                 <select
                   className="h-14 rounded-2xl border border-slate-300 bg-white px-4 text-center text-lg font-semibold outline-none transition focus:border-blue-500 focus:ring-0"
                   value={difficulty}

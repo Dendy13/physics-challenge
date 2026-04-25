@@ -1,10 +1,9 @@
+export type Mode = "simbol" | "teks";
 export type DifficultyLevel = "easy" | "medium" | "hard";
-export type LegacyDifficulty = "simbol" | "teks";
-export type Difficulty = DifficultyLevel | LegacyDifficulty;
+export type Difficulty = DifficultyLevel;
 export type Category =
   | "kinematika"
   | "dinamika"
-  | "termodinamika"
   | "listrik"
   | "mix";
 
@@ -23,14 +22,16 @@ export interface PublicQuestion {
 
 export interface GamePayload {
   seed: string;
-  difficulty: Difficulty;
+  mode: Mode;
+  difficulty: DifficultyLevel;
   category?: Category;
   questions: PublicQuestion[];
 }
 
 export interface SubmitPayload {
   username: string;
-  difficulty: Difficulty;
+  mode: Mode;
+  difficulty: DifficultyLevel;
   category?: Category;
   seed: string;
   answers: number[];
@@ -40,7 +41,8 @@ export interface SubmitPayload {
 export interface LeaderboardEntry {
   id?: string;
   username: string;
-  difficulty: Difficulty;
+  mode?: Mode;
+  difficulty: DifficultyLevel;
   category?: Category;
   score: number;
   correct_count: number;
