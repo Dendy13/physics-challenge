@@ -5,7 +5,8 @@ export type Category =
   | "kinematika"
   | "dinamika"
   | "listrik"
-  | "mix";
+  | "mix"
+    "termodinamika";
 
 export interface Question {
   id: string;

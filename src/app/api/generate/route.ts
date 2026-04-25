@@ -28,7 +28,7 @@ function parseCategory(value: string | null): Category {
     value === "listrik" ||
     value === "mix"
   ) {
-    return value;
+    return value as Category;
   }
 
   return "mix";
