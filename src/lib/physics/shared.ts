@@ -1,6 +1,6 @@
 import type { BabID, Difficulty, Mode, Question, SubBabID } from "@/types/game";
 
-export type GeneratorFn = (difficulty: Difficulty, mode: Mode) => Question[];
+export type GeneratorFn = (difficulty: Difficulty, mode: Mode, rng: () => number, count: number) => Question[];
 
 export function formatNumber(value: number): string {
   if (Number.isInteger(value)) {

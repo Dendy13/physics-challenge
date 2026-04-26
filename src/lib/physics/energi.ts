@@ -3,41 +3,44 @@ import { formatNumber, makeQuestion, type GeneratorFn } from "./shared";
 
 const bab: BabID = "energi";
 
-function generateEnergi(difficulty: Difficulty, mode: Mode): Question[] {
-  const m = difficulty === "hard" ? 2.5 : 2;
-  const g = 10;
-  const h = difficulty === "hard" ? 3.5 : 3;
-  const answer = m * g * h;
-  const questionText =
-    mode === "simbol"
-      ? `m = ${formatNumber(m)} kg, g = ${g} m/s^2, h = ${formatNumber(h)} m. Cari Ep!`
-      : `Sebuah benda bermassa ${formatNumber(m)} kg berada di ketinggian ${formatNumber(h)} m. Hitung energi potensialnya dengan g = 10 m/s^2.`;
+function generateEnergiQuestion(difficulty: Difficulty, mode: Mode, rng: () => number, count: number): Question[] {
+  return Array.from({ length: count }, (_, idx) => {
+    const baseM = 1 + rng() * 3;
+    const g = 10;
+    const baseH = 1 + rng() * 4;
+    const m = difficulty === "hard" ? baseM * 1.25 : baseM;
+    const h = difficulty === "hard" ? baseH * 1.25 : baseH;
+    const answer = m * g * h;
+    const questionText =
+      mode === "simbol"
+        ? `m = ${formatNumber(m)} kg, g = ${g} m/s^2, h = ${formatNumber(h)} m. Cari Ep!`
+        : `Sebuah benda bermassa ${formatNumber(m)} kg berada di ketinggian ${formatNumber(h)} m. Hitung energi potensialnya dengan g = 10 m/s^2.`;
 
-  return [
-    makeQuestion({
-      id: `energi-potensial-${difficulty}`,
+    return makeQuestion({
+      id: `energi-potensial-${difficulty}-${idx}`,
       bab,
       subBab: "energi_potensial",
       question: questionText,
       unit: "J",
       correctAnswer: answer,
       explanation: "Gunakan rumus Ep = m × g × h.",
-    }),
-  ];
+    });
+  });
 }
 
 export const subBabRegistry: Partial<Record<SubBabID, GeneratorFn>> = {
-  usaha: generateEnergi,
-  energi_kinetik: generateEnergi,
-  energi_potensial: generateEnergi,
-  energi_mekanik: generateEnergi,
+  usaha: generateEnergiQuestion,
+  energi_kinetik: generateEnergiQuestion,
+  energi_potensial: generateEnergiQuestion,
+  energi_mekanik: generateEnergiQuestion,
 };
 
-export function generate(subBab: SubBabID, difficulty: Difficulty, mode: Mode): Question[] {
+export function generate(subBab: SubBabID, difficulty: Difficulty, mode: Mode, rng: () => number, count: number): Question[] {
   if (subBab === "all") {
-    return Object.values(subBabRegistry).flatMap((generator) => generator(difficulty, mode));
+    const questionsPerSubBab = Math.ceil(count / Object.keys(subBabRegistry).length);
+    return Object.values(subBabRegistry).flatMap((generator) => generator(difficulty, mode, rng, questionsPerSubBab));
   }
 
   const generator = subBabRegistry[subBab];
-  return generator ? generator(difficulty, mode) : [];
+  return generator ? generator(difficulty, mode, rng, count) : [];
 }

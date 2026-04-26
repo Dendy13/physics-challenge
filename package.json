@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "debug:test": "npx ts-node debug-test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.53.0",

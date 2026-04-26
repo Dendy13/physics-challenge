@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { generateQuestions } from "@/lib/generator";
+import { generateQuestions, type GenerateProps } from "@/lib/generator";
 import type { BabID, Category, DifficultyLevel, Mode, Question, SubBabID } from "@/types/game";
 
 type GameState = "menu" | "playing" | "result";
@@ -287,7 +287,17 @@ export default function Home() {
 
     try {
       const generatedSeed = crypto.randomUUID();
-      const generatedQuestions = generateQuestions(selectedBab, selectedSubBab, difficulty, mode);
+      
+      const props: GenerateProps = {
+        seed: generatedSeed,
+        mode,
+        difficulty,
+        count: 10,
+        bab: selectedBab,
+        subBab: selectedSubBab,
+      };
+
+      const generatedQuestions = generateQuestions(props);
 
       if (!generatedQuestions.length) {
         throw new Error("Soal tidak tersedia untuk kombinasi bab/sub-bab ini.");
@@ -322,13 +332,11 @@ export default function Home() {
           username,
           mode,
           bab: selectedBab,
-          sub_bab: selectedSubBab,
+          subBab: selectedSubBab,
           category: leaderboardCategory,
           difficulty,
           seed,
           answers: finalAnswers,
-          correct_count: 0,
-          total_questions: finalAnswers.length,
           duration: elapsed,
         }),
       });

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateQuestions } from "@/lib/generator";
+import { generateQuestions, type GenerateProps } from "@/lib/generator";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import type {
   BabID,
@@ -103,22 +103,9 @@ function isAnswerCorrect(actual: number, userAnswer: number): boolean {
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as SubmitPayload;
-    const {
-      username,
-      mode,
-      difficulty,
-      category,
-      bab,
-      subBab,
-      sub_bab,
-      seed,
-      answers,
-      duration,
-      correct_count,
-      total_questions,
-    } = body;
-
-    const normalizedSubBab = sub_bab ?? subBab;
+    console.log("[DEBUG] Payload:", body);
+    
+    const { username, mode, difficulty, category, bab, subBab, seed, answers, duration } = body;
     const normalizedCategory: Category = category ?? "mix";
 
     if (
@@ -128,8 +115,8 @@ export async function POST(request: Request) {
       !isMode(mode) ||
       !isDifficulty(difficulty) ||
       !isCategory(normalizedCategory) ||
-      !isBab(bab) ||
-      !isSubBab(normalizedSubBab) ||
+      (bab !== undefined && !isBab(bab)) ||
+      (subBab !== undefined && !isSubBab(subBab)) ||
       !seed ||
       typeof seed !== "string" ||
       !Array.isArray(answers) ||
@@ -137,17 +124,35 @@ export async function POST(request: Request) {
       answers.some((ans) => typeof ans !== "number" || Number.isNaN(ans)) ||
       typeof duration !== "number" ||
       Number.isNaN(duration) ||
-      duration <= 0 ||
-      (correct_count !== undefined &&
-        (typeof correct_count !== "number" || Number.isNaN(correct_count) || correct_count < 0)) ||
-      (total_questions !== undefined &&
-        (typeof total_questions !== "number" || Number.isNaN(total_questions) || total_questions < 1))
+      duration <= 0
     ) {
       return NextResponse.json({ error: "Payload tidak valid." }, { status: 400 });
     }
 
     const normalizedUsername = username.trim().slice(0, 32);
-    const rebuiltQuestions = generateQuestions(bab, normalizedSubBab, difficulty, mode);
+    
+    // Rebuild questions using the new GenerateProps format
+    let rebuiltQuestions;
+    if (bab && subBab) {
+      const props: GenerateProps = {
+        seed,
+        mode,
+        difficulty,
+        count: answers.length,
+        bab,
+        subBab,
+      };
+      rebuiltQuestions = generateQuestions(props);
+    } else {
+      const props: GenerateProps = {
+        seed,
+        mode,
+        difficulty,
+        count: answers.length,
+        category: normalizedCategory,
+      };
+      rebuiltQuestions = generateQuestions(props);
+    }
 
     let correctCount = 0;
     rebuiltQuestions.forEach((question, idx) => {
@@ -162,9 +167,7 @@ export async function POST(request: Request) {
       username: normalizedUsername,
       mode,
       difficulty,
-      category: resolveCategoryFromBab(bab),
-      bab,
-      sub_bab: normalizedSubBab,
+      category: bab ? resolveCategoryFromBab(bab) : normalizedCategory,
       score,
       correct_count: correctCount,
       total_questions: rebuiltQuestions.length,
