@@ -70,6 +70,9 @@ export interface SubmitPayload {
   category?: Category;
   bab?: BabID;
   subBab?: SubBabID;
+  sub_bab?: SubBabID;
+  correct_count?: number;
+  total_questions?: number;
   seed: string;
   answers: number[];
   duration: number;
@@ -83,6 +86,7 @@ export interface LeaderboardEntry {
   category?: Category;
   bab?: BabID;
   subBab?: SubBabID;
+  sub_bab?: SubBabID;
   score: number;
   correct_count: number;
   total_questions: number;

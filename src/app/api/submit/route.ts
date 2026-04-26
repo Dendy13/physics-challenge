@@ -103,7 +103,22 @@ function isAnswerCorrect(actual: number, userAnswer: number): boolean {
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as SubmitPayload;
-    const { username, mode, difficulty, category, bab, subBab, seed, answers, duration } = body;
+    const {
+      username,
+      mode,
+      difficulty,
+      category,
+      bab,
+      subBab,
+      sub_bab,
+      seed,
+      answers,
+      duration,
+      correct_count,
+      total_questions,
+    } = body;
+
+    const normalizedSubBab = sub_bab ?? subBab;
     const normalizedCategory: Category = category ?? "mix";
 
     if (
@@ -113,8 +128,8 @@ export async function POST(request: Request) {
       !isMode(mode) ||
       !isDifficulty(difficulty) ||
       !isCategory(normalizedCategory) ||
-      (bab !== undefined && !isBab(bab)) ||
-      (subBab !== undefined && !isSubBab(subBab)) ||
+      !isBab(bab) ||
+      !isSubBab(normalizedSubBab) ||
       !seed ||
       typeof seed !== "string" ||
       !Array.isArray(answers) ||
@@ -122,13 +137,17 @@ export async function POST(request: Request) {
       answers.some((ans) => typeof ans !== "number" || Number.isNaN(ans)) ||
       typeof duration !== "number" ||
       Number.isNaN(duration) ||
-      duration <= 0
+      duration <= 0 ||
+      (correct_count !== undefined &&
+        (typeof correct_count !== "number" || Number.isNaN(correct_count) || correct_count < 0)) ||
+      (total_questions !== undefined &&
+        (typeof total_questions !== "number" || Number.isNaN(total_questions) || total_questions < 1))
     ) {
       return NextResponse.json({ error: "Payload tidak valid." }, { status: 400 });
     }
 
     const normalizedUsername = username.trim().slice(0, 32);
-    const rebuiltQuestions = bab && subBab ? generateQuestions(bab, subBab, difficulty, mode) : generateQuestions(seed, mode, normalizedCategory, difficulty, answers.length);
+    const rebuiltQuestions = generateQuestions(bab, normalizedSubBab, difficulty, mode);
 
     let correctCount = 0;
     rebuiltQuestions.forEach((question, idx) => {
@@ -143,7 +162,9 @@ export async function POST(request: Request) {
       username: normalizedUsername,
       mode,
       difficulty,
-      category: bab ? resolveCategoryFromBab(bab) : normalizedCategory,
+      category: resolveCategoryFromBab(bab),
+      bab,
+      sub_bab: normalizedSubBab,
       score,
       correct_count: correctCount,
       total_questions: rebuiltQuestions.length,
